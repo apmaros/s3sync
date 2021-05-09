@@ -1,0 +1,15 @@
+[package]
+name = "s3sync"
+version = "0.1.0"
+authors = ["Maros Korinek <maros.korinek@skyscanner.net>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = "2.33.3" # cli
+google-cloud = { version = "0.2.1", features = ["storage"] }
+json = { package = "serde_json", version = "1.0.64" }
+reqwest = { version = "0.11.2", optional = true, default_features = false, features = ["blocking", "json", "rustls-tls"] }
+futures = "0.3"
+tokio = { version = "1.4.0", features = ["macros", "fs"] }
