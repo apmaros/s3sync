@@ -3,7 +3,6 @@ mod file;
 mod model;
 
 extern crate google_cloud;
-use futures::executor::block_on;
 use std::env;
 use std::path::{PathBuf};
 use crate::file::list_files;
@@ -12,6 +11,7 @@ use crate::model::photo::Photo;
 use crate::store::get_client;
 use std::fs::File;
 use std::io::Read;
+use std::process::exit;
 
 #[tokio::main]
 async fn main() {
@@ -25,8 +25,21 @@ async fn main() {
 
     println!("loaded {} photos", photos.len());
 
-    if photos.len() == 0 { println!("No photos to add") }
-    else { block_on(upload_to_cloud( PhotoAlbum {name: String::from(album_name), photos})) };
+    if photos.len() == 0 {
+        println!("No photos to add");
+        exit(0);
+    }
+
+    let blocking_task = tokio::task::spawn_blocking(|| {
+        upload_to_cloud(PhotoAlbum { name: String::from(album_name), photos })
+    }).await;
+
+    match blocking_task {
+        Ok(task) => task.await,
+        Err(err) => eprintln!("Failed to execute task due to {}", err)
+    }
+
+    println!("Finished uploading photos");
 }
 
 async fn upload_to_cloud(album: PhotoAlbum) {
@@ -38,11 +51,17 @@ async fn upload_to_cloud(album: PhotoAlbum) {
             match client.create_bucket(&album.name).await {
                 Ok(mut bucket) => {
                     for photo in album.photos {
-                        bucket.create_object(&photo.name, photo.content, "image/jpeg").await;
-                        println!("uploaded {}", &photo.name)
+                        match bucket.create_object(&photo.name, photo.content, "image/jpeg").await {
+                            Ok(o) => {
+                                println!("uploaded file {}", o.name());
+                            },
+                            Err(err) => println!("failed to create object due to {:?}", err)
+                        }
                     }
                 },
-                Err(err) => eprintln!("Failed to create bucket {} due to {:?}", &album.name, err)
+                Err(err) => {
+                    eprintln!("Failed to create bucket {} due to {:?}", &album.name, err)
+                }
             }
         }
     }
@@ -52,7 +71,6 @@ fn read_photos(paths: Vec<PathBuf>) -> Vec<Photo> {
     let mut photos = Vec::new();
 
     for path in paths {
-        println!("reading: {:?}", &path);
         let mut file = File::open(&path).expect("Failed to open file");
         let meta = file.metadata().expect("Can not read metadata");
         let mut buffer = vec![0; meta.len() as usize];
