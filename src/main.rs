@@ -3,12 +3,14 @@ mod file;
 mod model;
 
 extern crate google_cloud;
-use std::env;
-use std::path::{PathBuf};
+
 use crate::file::list_files;
 use crate::model::photo_album::PhotoAlbum;
 use crate::model::photo::Photo;
 use crate::store::get_client;
+
+use std::env;
+use std::path::{PathBuf};
 use std::fs::File;
 use std::io::{Read, Write, stdout, Stdout};
 use std::process::exit;
@@ -37,7 +39,14 @@ async fn main() {
     println!("Listing files for {}", folder_name);
     album_name.push_str(&args[2]);
 
-    let photos = read_photos(list_files(folder_name));
+    let photos = match read_photos(list_files(folder_name)) {
+        Ok(photos) => photos,
+        Err(err) => {
+            eprintln!("Failed to load photos");
+            exit_with_error(err);
+            return;
+        }
+    };
 
     println!("loaded {} photos", photos.len());
 
@@ -111,12 +120,12 @@ fn rewrite_message(mut stdout: &Stdout, msg: String) -> Result<(), GenError> {
     Ok(())
 }
 
-fn read_photos(paths: Vec<PathBuf>) -> Vec<Photo> {
+fn read_photos(paths: Vec<PathBuf>) -> Result<Vec<Photo>, GenError> {
     let mut photos = Vec::new();
 
     for path in paths {
-        let file = File::open(&path).expect("Failed to open file");
-        let meta = file.metadata().expect("Can not read metadata");
+        let file = File::open(&path)?;
+        let meta = file.metadata()?;
         let extension = match path.extension() {
             Some(extension) => extension.to_str().unwrap().to_lowercase(),
             None => "".to_string()
@@ -135,7 +144,7 @@ fn read_photos(paths: Vec<PathBuf>) -> Vec<Photo> {
         }
     }
 
-    photos
+    Ok(photos)
 }
 
 fn exit_with_error(err: GenError) {
