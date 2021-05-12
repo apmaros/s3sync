@@ -10,8 +10,24 @@ use crate::model::photo_album::PhotoAlbum;
 use crate::model::photo::Photo;
 use crate::store::get_client;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write, stdout, Stdout};
 use std::process::exit;
+use std::error::Error;
+use std::fmt;
+use crossterm::{QueueableCommand, cursor};
+use google_cloud::storage::Bucket;
+
+type GenError = Box<dyn std::error::Error>;
+
+#[derive(Debug)]
+struct SyncError(String);
+impl fmt::Display for SyncError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl Error for SyncError {}
+
 
 #[tokio::main]
 async fn main() {
@@ -34,46 +50,73 @@ async fn main() {
         upload_to_cloud(PhotoAlbum { name: String::from(album_name), photos })
     }).await;
 
-    match blocking_task {
+    let result = match blocking_task {
         Ok(task) => task.await,
-        Err(err) => eprintln!("Failed to execute task due to {}", err)
-    }
+        Err(err) => Err(GenError::from(err))
+    };
 
-    println!("Finished uploading photos");
+    match result {
+        Ok(_) => println!("Finished uploading photos"),
+        Err(err) => exit_with_error(err)
+    }
 }
 
-async fn upload_to_cloud(album: PhotoAlbum) {
-    let mut client = get_client().await.expect("Failed to get client");
+async fn upload_to_cloud(album: PhotoAlbum) -> Result<(), GenError>{
+    let mut client = get_client().await?;
     match client.bucket(&album.name).await {
-        Ok(_) => println!("Folder already exists, choose new name"),
+        Ok(_) => exit_with_error(
+            Box::new(SyncError(format!("Folder {} already exists, choose different name", &album.name).to_string().into())
+        )).into(),
         Err(_) => {
-            println!("Creating bucket 🧺");
+            println!("Creating bucket 🧺 {}", &album.name);
             match client.create_bucket(&album.name).await {
-                Ok(mut bucket) => {
-                    for photo in album.photos {
-                        match bucket.create_object(&photo.name, photo.content, "image/jpeg").await {
-                            Ok(o) => {
-                                println!("uploaded file {}", o.name());
-                            },
-                            Err(err) => println!("failed to create object due to {:?}", err)
-                        }
-                    }
-                },
+                Ok(bucket) => upload_photos(bucket, album.photos).await?,
                 Err(err) => {
-                    eprintln!("Failed to create bucket {} due to {:?}", &album.name, err)
+                    eprintln!("Failed to create bucket {} due to {:?}", &album.name, err);
+                    return Err(GenError::from(err))
                 }
             }
         }
     }
+    Ok(())
+}
+
+async fn upload_photos(mut bucket: Bucket, photos: Vec<Photo>) -> Result<(), GenError> {
+    let stdout = &stdout();
+
+    for (i, photo) in photos.iter().enumerate(){
+
+        let mut file = File::open(&photo.path)?;
+        let mut buffer = vec![0; photo.metadata.len() as usize];
+        file.read(&mut buffer).expect("Failed to read file");
+
+        match bucket.create_object(&photo.name, buffer, "image/jpeg").await {
+            Ok(_) => {
+                rewrite_message(&stdout, format!("uploaded {} / {} files", i, photos.len())).unwrap()
+            },
+            Err(err) => {
+                println!("failed to create object due to {:?}", err);
+            }
+        };
+    }
+
+    Ok(())
+}
+
+fn rewrite_message(mut stdout: &Stdout, msg: String) -> Result<(), GenError> {
+    stdout.queue(cursor::SavePosition)?;
+    stdout.write(msg.as_bytes())?;
+    stdout.queue(cursor::RestorePosition)?;
+    stdout.flush()?;
+    Ok(())
 }
 
 fn read_photos(paths: Vec<PathBuf>) -> Vec<Photo> {
     let mut photos = Vec::new();
 
     for path in paths {
-        let mut file = File::open(&path).expect("Failed to open file");
+        let file = File::open(&path).expect("Failed to open file");
         let meta = file.metadata().expect("Can not read metadata");
-        let mut buffer = vec![0; meta.len() as usize];
         let extension = match path.extension() {
             Some(extension) => extension.to_str().unwrap().to_lowercase(),
             None => "".to_string()
@@ -81,12 +124,9 @@ fn read_photos(paths: Vec<PathBuf>) -> Vec<Photo> {
 
         let filename = path.file_name().unwrap().to_str().unwrap();
         if meta.is_file() && extension == "jpg" {
-            file.read(&mut buffer).expect("Failed to read file");
-
             let photo = Photo {
                 name: String::from(filename),
                 path: Box::from(path),
-                content: buffer,
                 metadata: meta
             };
             photos.push(photo);
@@ -96,4 +136,9 @@ fn read_photos(paths: Vec<PathBuf>) -> Vec<Photo> {
     }
 
     photos
+}
+
+fn exit_with_error(err: GenError) {
+    eprintln!("Exiting with error {}", err);
+    exit(1);
 }

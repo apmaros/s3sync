@@ -6,7 +6,6 @@ use std::fmt::Formatter;
 pub struct Photo {
     pub(crate) name: String,
     pub(crate) path: Box<Path>,
-    pub(crate) content: Vec<u8>,
     pub(crate) metadata: Metadata
 }
 
