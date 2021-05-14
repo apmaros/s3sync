@@ -3,26 +3,23 @@ mod file;
 mod model;
 mod sync_error;
 mod cli;
-
-extern crate google_cloud;
+mod image;
 
 use crate::file::list_files;
 use crate::model::photo_album::ImageAlbum;
 use crate::model::photo::Photo;
 use crate::store::{get_client, list_bucket_names};
-
+use crate::sync_error::SyncError;
+use crate::cli::{build_cli, CliCommand, UploadCmd};
+use crate::cli::CliCommand::UPLOAD;
 use std::path::{PathBuf};
 use std::fs::File;
 use std::io::{Read, Write, stdout, Stdout};
 use std::process::exit;
 use crossterm::{QueueableCommand, cursor};
-use magick_rust::{magick_wand_genesis, MagickWand};
-use std::sync::Once;
-use crate::sync_error::SyncError;
 use std::str::FromStr;
-use crate::cli::{build_cli, CliCommand, UploadCmd};
-use crate::cli::CliCommand::UPLOAD;
 use google_cloud::storage::Bucket;
+use crate::image::resize;
 
 type GenError = Box<dyn std::error::Error>;
 
@@ -32,7 +29,7 @@ async fn main() {
 
     let cmd = CliCommand::from_str(
         matches.subcommand_name().unwrap_or_else(|| {
-            eprintln!("No parameter was provided");
+            eprintln!("No parameter was provided, run `cloud help` to learn more");
             exit(1);
     }));
 
@@ -43,7 +40,7 @@ async fn main() {
             );
             let mut album_name = "apmaros_".to_owned();
             album_name.push_str(&c.album_name);
-            upload_images(&c.folder_name, &album_name, c.downscale).await
+            upload(&c.folder_name, &album_name, c.downscale).await
         }
         Ok(CliCommand::LIST) => print_bucket_names().await,
         Err(invalid_cmd) => Err(
@@ -68,7 +65,7 @@ async fn print_bucket_names() -> Result<(), GenError>{
 
     let limit = 100;
     let buckets_to_print = if bucket_names.len() > limit {
-        println!("Too many bucket to print, first {} will be printed", limit);
+        println!("Too many buckets to print, first {} will be printed", limit);
         &bucket_names[0..limit]
     } else { &bucket_names };
 
@@ -77,7 +74,7 @@ async fn print_bucket_names() -> Result<(), GenError>{
     Ok(())
 }
 
-async fn upload_images(folder_name: &str, album_name: &str, downscale: bool) -> Result<(), GenError>{
+async fn upload(folder_name: &str, album_name: &str, downscale: bool) -> Result<(), GenError>{
     let photos = read_photos(list_files(folder_name))?;
     println!("loaded {} photos", photos.len());
 
@@ -89,10 +86,10 @@ async fn upload_images(folder_name: &str, album_name: &str, downscale: bool) -> 
     if downscale { println!("⚠️  Images will stored in lower size and resolution");
     } else { println!("Images will be stored in original resolution")}
 
-    let album_name_s = album_name.parse().unwrap();
-    let album = ImageAlbum { name: album_name_s, photos, downscale};
+    let name = album_name.parse().unwrap();
+    let album = ImageAlbum { name, photos, downscale };
     let blocking_task = tokio::task::spawn_blocking(move || {
-        upload_images_to_cloud(album)
+        upload_album(album)
     }).await;
 
     match blocking_task {
@@ -101,7 +98,7 @@ async fn upload_images(folder_name: &str, album_name: &str, downscale: bool) -> 
     }
 }
 
-async fn upload_images_to_cloud(album: ImageAlbum) -> Result<(), GenError>{
+async fn upload_album(album: ImageAlbum) -> Result<(), GenError>{
     let bucket = create_bucket(&album.name).await?;
     upload_photos(bucket, album).await
 }
@@ -139,30 +136,8 @@ async fn upload_photos(mut bucket: Bucket, album: ImageAlbum) -> Result<(), GenE
             }
         };
     }
-    println!(); // start new line
+    println!();
     Ok(())
-}
-static START: Once = Once::new();
-
-fn resize(data: &Vec<u8>) -> Result<Vec<u8>, &'static str> {
-    START.call_once(|| {
-        magick_wand_genesis();
-    });
-
-    let wand = MagickWand::new();
-    wand.read_image_blob(data)?;
-
-    let new_width = wand.get_image_width() / 5;
-    let new_height = wand.get_image_height() / 5;
-    wand.adaptive_resize_image(new_width as usize, new_height as usize)?;
-
-    let (res_x, res_y) = wand.get_image_resolution()?;
-    let new_res_x = res_x * 0.55;
-    let new_res_y = res_y * 0.55;
-
-    wand.set_resolution(new_res_x, new_res_y)?;
-
-    wand.write_image_blob("jpeg")
 }
 
 fn rewrite_message(mut stdout: &Stdout, msg: String) -> Result<(), GenError> {
