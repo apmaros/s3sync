@@ -66,6 +66,9 @@ async fn upload_images(folder_name: &str, album_name: &str, downscale: bool) -> 
         exit(0);
     }
 
+    if downscale { println!("⚠️  Images will stored in lower size and resolution");
+    } else { print!("Images will be stored in original resolution")}
+
     let album_name_s = album_name.parse().unwrap();
     let blocking_task = tokio::task::spawn_blocking(move || {
         upload_to_cloud(ImageAlbum { name: album_name_s, photos, downscale})
@@ -105,11 +108,12 @@ async fn upload_photos(mut bucket: Bucket, photos: Vec<Photo>, downscale: bool) 
         let mut buffer = vec![0; photo.metadata.len() as usize];
         file.read(&mut buffer)?;
 
-        let image_data = if downscale { resize(&buffer)? } else { buffer };
+        let image_data = if downscale {
+            resize(&buffer)? } else { buffer };
 
         match bucket.create_object(&photo.name, image_data, "image/jpeg").await {
             Ok(_) => {
-                rewrite_message(&stdout, format!("uploaded {} / {} files", i, photos.len()))?
+                rewrite_message(&stdout, format!("uploaded {} / {} files", i+1, photos.len()))?
             },
             Err(err) => {
                 println!("failed to create object due to {:?}", err);
