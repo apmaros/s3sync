@@ -1,7 +1,10 @@
-type GenError = Box<dyn std::error::Error>;
+use std::fmt;
+use std::error::Error;
 
 #[derive(Debug)]
-struct SyncError(String);
+pub(crate) struct SyncError(
+    pub(crate) String
+);
 impl fmt::Display for SyncError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
