@@ -9,7 +9,7 @@ extern crate google_cloud;
 use crate::file::list_files;
 use crate::model::photo_album::ImageAlbum;
 use crate::model::photo::Photo;
-use crate::store::get_client;
+use crate::store::{get_client, list_bucket_names};
 
 use std::path::{PathBuf};
 use std::fs::File;
@@ -41,23 +41,43 @@ async fn main() {
             let c = UploadCmd::build(
                 matches.subcommand_matches(UPLOAD.to_str()).unwrap()
             );
-            upload_images(&c.folder_name, &c.album_name, c.downscale).await
-        },
-        Ok(CliCommand::DELETE) => {
-            unimplemented!("Delete is not implemented")
+            let mut album_name = "apmaros_".to_owned();
+            album_name.push_str(&c.album_name);
+            upload_images(&c.folder_name, &album_name, c.downscale).await
         }
+        Ok(CliCommand::LIST) => print_bucket_names().await,
         Err(invalid_cmd) => Err(
             GenError::from(SyncError(format!("Command {} is not valid", invalid_cmd).to_string().into())
         ))
     };
 
+    println!();
     match result {
         Ok(_) => println!("Success 🎉"),
-        Err(err) => exit_with_error(err)
+        Err(err) => {
+            eprintln!("❌  Failed due to {}", err);
+            exit(1);
+        }
     }
 }
 
-async fn upload_images(folder_name: &str, album_name: &str, downscale: bool) -> Result<(), GenError> {
+async fn print_bucket_names() -> Result<(), GenError>{
+    let bucket_names = list_bucket_names().await?;
+
+    println!("🧺 found {} buckets:", bucket_names.len());
+
+    let limit = 100;
+    let buckets_to_print = if bucket_names.len() > limit {
+        println!("Too many bucket to print, first {} will be printed", limit);
+        &bucket_names[0..limit]
+    } else { &bucket_names };
+
+    buckets_to_print.iter().for_each(|b| println!("\t{}", b));
+
+    Ok(())
+}
+
+async fn upload_images(folder_name: &str, album_name: &str, downscale: bool) -> Result<(), GenError>{
     let photos = read_photos(list_files(folder_name))?;
     println!("loaded {} photos", photos.len());
 
@@ -67,11 +87,12 @@ async fn upload_images(folder_name: &str, album_name: &str, downscale: bool) -> 
     }
 
     if downscale { println!("⚠️  Images will stored in lower size and resolution");
-    } else { print!("Images will be stored in original resolution")}
+    } else { println!("Images will be stored in original resolution")}
 
     let album_name_s = album_name.parse().unwrap();
+    let album = ImageAlbum { name: album_name_s, photos, downscale};
     let blocking_task = tokio::task::spawn_blocking(move || {
-        upload_to_cloud(ImageAlbum { name: album_name_s, photos, downscale})
+        upload_images_to_cloud(album)
     }).await;
 
     match blocking_task {
@@ -80,40 +101,38 @@ async fn upload_images(folder_name: &str, album_name: &str, downscale: bool) -> 
     }
 }
 
-async fn upload_to_cloud(album: ImageAlbum) -> Result<(), GenError>{
-    let mut client = get_client().await?;
-    match client.bucket(&album.name).await {
-        Ok(_) => exit_with_error(
-            Box::new(SyncError(format!("Folder {} already exists, choose different name", &album.name).to_string().into())
-        )).into(),
-        Err(_) => {
-            println!("Creating bucket 🧺 {}", &album.name);
-            match client.create_bucket(&album.name).await {
-                Ok(bucket) => upload_photos(bucket, album.photos, album.downscale).await?,
-                Err(err) => {
-                    eprintln!("Failed to create bucket {} due to error", &album.name);
-                    return Err(GenError::from(err))
-                }
-            }
-        }
-    }
-    Ok(())
+async fn upload_images_to_cloud(album: ImageAlbum) -> Result<(), GenError>{
+    let bucket = create_bucket(&album.name).await?;
+    upload_photos(bucket, album).await
 }
 
-async fn upload_photos(mut bucket: Bucket, photos: Vec<Photo>, downscale: bool) -> Result<(), GenError> {
+async fn create_bucket(name: &str) -> Result<Bucket, GenError>{
+    let mut client = get_client().await?;
+
+    println!("Creating bucket 🧺 {}", &name);
+    match client.create_bucket(name).await {
+        Ok(bucket) => Ok(bucket),
+        Err(err) => {
+            eprintln!("Failed to create bucket {} due to error", &name);
+            return Err(GenError::from(err))
+        }
+    }
+}
+
+async fn upload_photos(mut bucket: Bucket, album: ImageAlbum) -> Result<(), GenError> {
     let stdout = &stdout();
 
-    for (i, photo) in photos.iter().enumerate(){
+    for (i, photo) in album.photos.iter().enumerate(){
         let mut file = File::open(&photo.path)?;
         let mut buffer = vec![0; photo.metadata.len() as usize];
         file.read(&mut buffer)?;
 
-        let image_data = if downscale {
+        let image_data = if album.downscale {
             resize(&buffer)? } else { buffer };
 
         match bucket.create_object(&photo.name, image_data, "image/jpeg").await {
             Ok(_) => {
-                rewrite_message(&stdout, format!("uploaded {} / {} files", i+1, photos.len()))?
+                rewrite_message(&stdout, format!("uploaded {} / {} files", i+1, album.photos.len()))?
             },
             Err(err) => {
                 println!("failed to create object due to {:?}", err);
@@ -179,9 +198,4 @@ fn read_photos(paths: Vec<PathBuf>) -> Result<Vec<Photo>, GenError> {
     }
 
     Ok(photos)
-}
-
-fn exit_with_error(err: GenError) {
-    eprintln!("Exiting with error {}", err);
-    exit(1);
 }

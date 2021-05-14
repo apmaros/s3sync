@@ -8,8 +8,7 @@ static AUTHOR: &str = "apmaros";
 static DESCRIPTION: &str = "A set of useful tools for fun and profit";
 const UPLOAD: &str = "upload";
 const UPLOAD_SHORT: &str = "u";
-const DELETE: &str = "delete";
-const DELETE_SHORT: &str = "d";
+const LIST: &str = "list";
 pub(crate) const FOLDER: &str = "folder";
 const FOLDER_SHORT: &str = "folder";
 pub(crate) const ALBUM: &str = "album";
@@ -24,6 +23,7 @@ pub(crate) fn build_cli<'a>() -> ArgMatches<'a> {
         .about(DESCRIPTION)
         .subcommand(App::new(UPLOAD)
             .version_short(UPLOAD_SHORT)
+            .help("Uploads images to cloud")
             .arg(Arg::with_name(FOLDER)
                 .short(FOLDER_SHORT)
                 .long(FOLDER)
@@ -31,6 +31,7 @@ pub(crate) fn build_cli<'a>() -> ArgMatches<'a> {
                 .help("Folder containing images to be uploaded")
                 .required(true))
             .arg(Arg::with_name(ALBUM)
+                .help("List available albums")
                 .short(ALBUM_SHORT)
                 .long(ALBUM)
                 .takes_value(true)
@@ -41,20 +42,13 @@ pub(crate) fn build_cli<'a>() -> ArgMatches<'a> {
                 .long(DOWNSCALE)
                 .takes_value(false)
                 .help("Downscales images")))
-        .subcommand(App::new(DELETE)
-            .version_short(DELETE_SHORT)
-            .arg(Arg::with_name(ALBUM)
-                .short(ALBUM_SHORT)
-                .long(ALBUM)
-                .takes_value(true)
-                .help("Folder name in cloud to upload images into")
-                .required(true)))
+        .subcommand(App::new(LIST))
         .get_matches()
 }
 
 pub(crate) enum CliCommand {
     UPLOAD,
-    DELETE
+    LIST
 }
 
 impl FromStr for CliCommand {
@@ -63,8 +57,8 @@ impl FromStr for CliCommand {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             UPLOAD => Ok(Self::UPLOAD),
-            DELETE => Ok(Self::DELETE),
-            _ => Err("Command was not recognised")
+            LIST => Ok(Self::LIST),
+            _ => Err("Command {} was not recognised")
         }
     }
 }
@@ -74,7 +68,7 @@ impl CliCommand {
     pub(crate) fn to_str(&self) -> &str {
         match self {
             CliCommand::UPLOAD => UPLOAD,
-            CliCommand::DELETE => DELETE,
+            CliCommand::LIST => LIST
         }
     }
 }
