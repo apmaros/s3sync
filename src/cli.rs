@@ -9,6 +9,8 @@ static DESCRIPTION: &str = "A set of useful tools for fun and profit";
 const UPLOAD: &str = "upload";
 const UPLOAD_SHORT: &str = "u";
 const LIST: &str = "list";
+const DOWNLOAD: &str = "download";
+const DOWNLOAD_SHORT: &str = "d";
 pub(crate) const FOLDER: &str = "folder";
 const FOLDER_SHORT: &str = "folder";
 pub(crate) const ALBUM: &str = "album";
@@ -41,12 +43,22 @@ pub(crate) fn build_cli<'a>() -> ArgMatches<'a> {
                 .long(DOWNSCALE)
                 .takes_value(false)
                 .help("Downscales images")))
+        .subcommand(App::new(DOWNLOAD)
+            .version_short(DOWNLOAD_SHORT)
+            .help("Downloads files from cloud")
+            .arg(Arg::with_name(ALBUM)
+                .short(ALBUM_SHORT)
+                .long(ALBUM)
+                .takes_value(true)
+                .help("Album containing files to be downloaded")
+                .required(true)))
         .subcommand(App::new(LIST))
         .get_matches()
 }
 
 pub(crate) enum CliCommand {
     UPLOAD,
+    DOWNLOAD,
     LIST
 }
 
@@ -57,6 +69,7 @@ impl FromStr for CliCommand {
         match s {
             UPLOAD => Ok(Self::UPLOAD),
             LIST => Ok(Self::LIST),
+            DOWNLOAD => Ok(Self::DOWNLOAD),
             _ => Err("Command {} was not recognised")
         }
     }
@@ -67,7 +80,8 @@ impl CliCommand {
     pub(crate) fn to_str(&self) -> &str {
         match self {
             CliCommand::UPLOAD => UPLOAD,
-            CliCommand::LIST => LIST
+            CliCommand::LIST => LIST,
+            CliCommand::DOWNLOAD => DOWNLOAD
         }
     }
 }
@@ -86,5 +100,17 @@ impl UploadCmd {
         let downscale = matches.is_present(DOWNSCALE);
 
         UploadCmd { folder_name, album_name, downscale }
+    }
+}
+
+pub(crate) struct DownloadCmd {
+    pub album_name: String
+}
+
+impl DownloadCmd {
+    pub(crate) fn build(matches: &ArgMatches) -> Self {
+        let album_name = matches.value_of(ALBUM).unwrap().to_owned();
+
+        DownloadCmd { album_name }
     }
 }
