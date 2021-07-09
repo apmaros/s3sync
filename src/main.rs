@@ -2,7 +2,6 @@ mod file;
 mod model;
 mod sync_error;
 mod cli;
-mod image;
 mod s3_store;
 mod utils;
 
@@ -17,7 +16,6 @@ use std::fs::File;
 use std::io::{Read, Write, stdout};
 use std::process::exit;
 use std::str::FromStr;
-use crate::image::resize;
 use crate::s3_store::{StoreClient};
 use crate::utils::rewrite_message;
 
@@ -137,11 +135,8 @@ async fn upload_album(client: StoreClient, album: ImageAlbum) -> Result<(), GenE
         let mut buffer = vec![0; photo.metadata.len() as usize];
         file.read(&mut buffer)?;
 
-        let image_data = if album.downscale {
-            resize(&buffer)? } else { buffer };
-
         let key = format!("{}/{}", album.name, photo.name);
-        match client.put(key, &image_data, BUCKET_NAME.to_owned()).await {
+        match client.put(key, &buffer, BUCKET_NAME.to_owned()).await {
             Ok(_) => {
                 rewrite_message(stdout(), format!("uploaded {} / {} files", i+1, album.photos.len()))?
             },
