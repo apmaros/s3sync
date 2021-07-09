@@ -21,6 +21,7 @@ impl StoreClient {
         Ok(StoreClient { inner })
     }
 
+    #[allow(dead_code)]
     pub async fn create_bucket(&self, name: String) -> Result<String, GenError>{
         let request = CreateBucketRequest{
             acl: None,

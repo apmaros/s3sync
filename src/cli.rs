@@ -88,8 +88,7 @@ impl CliCommand {
 
 pub(crate) struct UploadCmd {
     pub(crate) folder_name: String,
-    pub(crate) album_name: String,
-    pub(crate) downscale: bool
+    pub(crate) album_name: String
 }
 
 impl UploadCmd {
@@ -97,9 +96,8 @@ impl UploadCmd {
         // safe to unwrap, these args are required
         let folder_name = matches.value_of(FOLDER).unwrap().to_owned();
         let album_name = matches.value_of(ALBUM).unwrap().to_owned();
-        let downscale = matches.is_present(DOWNSCALE);
 
-        UploadCmd { folder_name, album_name, downscale }
+        UploadCmd { folder_name, album_name }
     }
 }
 

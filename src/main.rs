@@ -21,7 +21,6 @@ use crate::utils::rewrite_message;
 
 type GenError = Box<dyn std::error::Error>;
 static BUCKET_NAME: &str = "apmaros-store";
-static ALBUM_PREFIX: &str = "albums/";
 static IMAGE_EXTENSION: &str = "jpg";
 
 #[tokio::main]
@@ -44,7 +43,7 @@ async fn main() {
                 matches.subcommand_matches(UPLOAD.to_str()).unwrap()
             );
 
-            upload(store.clone(), &c.folder_name, &c.album_name, c.downscale).await
+            upload(store.clone(), &c.folder_name, &c.album_name).await
         }
         Ok(CliCommand::LIST) => list_albums(store).await,
         Ok(CliCommand::DOWNLOAD) => {
@@ -60,7 +59,7 @@ async fn main() {
 
     println!();
     match result {
-        Ok(_) => println!("Success 🎉"),
+        Ok(_) => exit(0),
         Err(err) => {
             eprintln!("❌  Failed due to error='{}'", err);
             exit(1);
@@ -69,7 +68,10 @@ async fn main() {
 }
 
 async fn download(store: StoreClient, album_name: String) -> Result<(), GenError> {
-    let keys = store.list_keys(BUCKET_NAME, Some(album_name.as_str())).await?;
+    let keys = store.list_keys(
+        BUCKET_NAME,
+        Some(album_name.as_str())
+    ).await?;
 
     for (i, key) in keys.iter().enumerate() {
         let body = store.get_object(BUCKET_NAME, key.as_str()).await?;
@@ -89,10 +91,10 @@ async fn download(store: StoreClient, album_name: String) -> Result<(), GenError
 async fn list_albums(store: StoreClient) -> Result<(), GenError>{
     let album_names = store.list_folders(
         BUCKET_NAME.to_string(),
-        Some(ALBUM_PREFIX.to_string())
+        None
     ).await.unwrap();
 
-    println!("🧺 found {} albums:", album_names.len());
+    println!("📚 found {} albums:", album_names.len());
 
     let limit = 100;
     let buckets_to_print = if album_names.len() > limit {
@@ -105,7 +107,7 @@ async fn list_albums(store: StoreClient) -> Result<(), GenError>{
     Ok(())
 }
 
-async fn upload(store: StoreClient, folder_name: &str, album_name: &str, downscale: bool) -> Result<(), GenError>{
+async fn upload(store: StoreClient, folder_name: &str, album_name: &str) -> Result<(), GenError>{
     let photos = read_photos(list_files(folder_name))?;
     println!("loaded {} photos", photos.len());
 
@@ -114,11 +116,8 @@ async fn upload(store: StoreClient, folder_name: &str, album_name: &str, downsca
         exit(0);
     }
 
-    if downscale { println!("⚠️  Images will stored in lower size and resolution");
-    } else { println!("Images will be stored in original resolution")}
-
     let name = album_name.parse().unwrap();
-    let album = ImageAlbum { name, photos, downscale };
+    let album = ImageAlbum { name, photos };
     let blocking_task = tokio::task::spawn_blocking(move || {
         upload_album(store, album)
     }).await;
